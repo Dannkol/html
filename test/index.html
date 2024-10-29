@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control del Motor Paso a Paso y Sensor DHT11</title>
+</head>
+<body>
+    <h1>Datos del Sensor DHT11</h1>
+    <p>Temperatura: <span id="temp">0</span> °C</p>
+    <p>Humedad: <span id="humidity">0</span> %</p>
+    <p>Estado del motor: <span id="motor">Inactivo</span></p>
+    <button id="startBtn">Iniciar Motor</button>
+    <button id="stopBtn">Detener Motor</button>
+
+    <script>
+        // Crear conexión WebSocket con el ESP32 (usar la dirección IP del ESP32)
+        var websocket = new WebSocket('ws://192.168.1.79:81');
+
+        // Manejar la conexión abierta
+        websocket.onopen = function(event) {
+            console.log("Conectado al WebSocket del ESP32");
+        };
+
+        // Manejar mensajes recibidos
+        websocket.onmessage = function(event) {
+            // Parsear los datos JSON
+            var data = JSON.parse(event.data);
+            document.getElementById('temp').textContent = data.temperature;
+            document.getElementById('humidity').textContent = data.humidity;
+            document.getElementById('motor').textContent = data.motorActive ? "Activo" : "Inactivo";
+        };
+
+        // Manejar la desconexión
+        websocket.onclose = function(event) {
+            console.log("Desconectado del WebSocket");
+        };
+
+        // Manejar errores
+        websocket.onerror = function(event) {
+            console.log("Error: " + event);
+        };
+
+        // Iniciar motor cuando se presiona el botón
+        document.getElementById('startBtn').addEventListener('click', function() {
+            websocket.send("START_MOTOR");
+        });
+
+        // Detener motor cuando se presiona el botón
+        document.getElementById('stopBtn').addEventListener('click', function() {
+            websocket.send("STOP_MOTOR");
+        });
+    </script>
+</body>
+</html>
