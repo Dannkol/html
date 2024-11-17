@@ -1,55 +1,193 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Control del Motor Paso a Paso y Sensor DHT11</title>
+    <title>ESP Monitor</title>
+    <style>
+        .dashboard {
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .sensor-card {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .value {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .timestamp {
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
 </head>
 <body>
-    <h1>Datos del Sensor DHT11</h1>
-    <p>Temperatura: <span id="temp">0</span> °C</p>
-    <p>Humedad: <span id="humidity">0</span> %</p>
-    <p>Estado del motor: <span id="motor">Inactivo</span></p>
-    <button id="startBtn">Iniciar Motor</button>
-    <button id="stopBtn">Detener Motor</button>
+    <div class="dashboard">
+        <div class="sensor-card">
+            <h3>Temperatura</h3>
+            <div id="temperature" class="value">--°C</div>
+            <div id="tempTimestamp" class="timestamp">--</div>
+        </div>
+        <div class="sensor-card">
+            <h3>Humedad</h3>
+            <div id="humidity" class="value">--%</div>
+            <div id="humTimestamp" class="timestamp">--</div>
+        </div>
+    </div>
 
     <script>
-        // Crear conexión WebSocket con el ESP32 (usar la dirección IP del ESP32)
-        var websocket = new WebSocket('ws://192.168.1.79:81');
+        let wsService;
 
-        // Manejar la conexión abierta
-        websocket.onopen = function(event) {
-            console.log("Conectado al WebSocket del ESP32");
+        class WebSocketService {
+            constructor() {
+                this.socket = null;
+                this.token = null;
+                this.isConnecting = false;
+            }
+
+            async connect(token) {
+                if (this.isConnecting) return;
+                this.isConnecting = true;
+                this.token = token;
+                
+                try {
+                    const wsUrl = `ws://192.168.1.62:8000/ws/frontend?token=Bearer ${token}`;
+                    this.socket = new WebSocket(wsUrl);
+
+                    this.socket.onopen = () => {
+                        console.log('Conexión WebSocket abierta');
+                        this.isConnecting = false;
+                        this.subscribeToDevice("480D3220691C");
+                    };
+
+                    this.socket.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            console.log('Mensaje recibido:', data);
+                            if (data.type === 'ESP_DATA') {
+                                this.updateUI(data.data);
+                            }
+                        } catch (error) {
+                            console.error('Error procesando mensaje:', error);
+                        }
+                    };
+
+                    this.socket.onclose = (event) => {
+                        console.log('Conexión cerrada:', event);
+                        this.isConnecting = false;
+                        if (!event.wasClean) {
+                            setTimeout(() => this.connect(this.token), 5000);
+                        }
+                    };
+
+                    this.socket.onerror = (error) => {
+                        console.error('Error WebSocket:', error);
+                        this.isConnecting = false;
+                    };
+
+                } catch (error) {
+                    console.error('Error de conexión:', error);
+                    this.isConnecting = false;
+                    setTimeout(() => this.connect(this.token), 5000);
+                }
+            }
+
+            subscribeToDevice(deviceId) {
+                if (this.socket?.readyState === WebSocket.OPEN) {
+                    try {
+                        console.log('Enviando suscripción a:', deviceId);
+                        this.socket.send(JSON.stringify({
+                            type: 'SUBSCRIBE',
+                            device_id: deviceId
+                        }));
+                    } catch (error) {
+                        console.error('Error enviando suscripción:', error);
+                    }
+                }
+            }
+
+            updateUI(data) {
+                try {
+                    console.log('Actualizando UI con datos:', data);
+                    
+                    const tempElement = document.getElementById('temperature');
+                    const humElement = document.getElementById('humidity');
+                    
+                    if (tempElement && data.temperature !== undefined) {
+                        tempElement.textContent = `${data.temperature}°C`;
+                    }
+                    
+                    if (humElement && data.humidity !== undefined) {
+                        humElement.textContent = `${data.humidity}%`;
+                    }
+
+                    const now = new Date().toLocaleTimeString();
+                    const tempTimestamp = document.getElementById('tempTimestamp');
+                    const humTimestamp = document.getElementById('humTimestamp');
+                    
+                    if (tempTimestamp) tempTimestamp.textContent = `Última actualización: ${now}`;
+                    if (humTimestamp) humTimestamp.textContent = `Última actualización: ${now}`;
+                } catch (error) {
+                    console.error('Error actualizando UI:', error);
+                }
+            }
+
+            disconnect() {
+                if (this.socket) {
+                    this.socket.close();
+                }
+            }
+        }
+
+        async function login() {
+            try {
+                const response = await fetch('http://192.168.1.62:8000/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: 'Dannkol',
+                        password: 'contraseña1234'
+                    })
+                });
+
+                if (!response.ok) throw new Error('Error en login');
+                return await response.json();
+            } catch (error) {
+                console.error('Error en login:', error);
+                throw error;
+            }
+        }
+
+        async function initializeApp() {
+            try {
+                const loginData = await login();
+                if (loginData.access_token) {
+                    wsService = new WebSocketService();
+                    await wsService.connect(loginData.access_token);
+                }
+            } catch (error) {
+                console.error('Error inicializando app:', error);
+            }
+        }
+
+        // Prevenir recargas accidentales
+        window.onbeforeunload = function() {
+            if (wsService) {
+                wsService.disconnect();
+            }
         };
 
-        // Manejar mensajes recibidos
-        websocket.onmessage = function(event) {
-            // Parsear los datos JSON
-            var data = JSON.parse(event.data);
-            document.getElementById('temp').textContent = data.temperature;
-            document.getElementById('humidity').textContent = data.humidity;
-            document.getElementById('motor').textContent = data.motorActive ? "Activo" : "Inactivo";
-        };
-
-        // Manejar la desconexión
-        websocket.onclose = function(event) {
-            console.log("Desconectado del WebSocket");
-        };
-
-        // Manejar errores
-        websocket.onerror = function(event) {
-            console.log("Error: " + event);
-        };
-
-        // Iniciar motor cuando se presiona el botón
-        document.getElementById('startBtn').addEventListener('click', function() {
-            websocket.send("START_MOTOR");
-        });
-
-        // Detener motor cuando se presiona el botón
-        document.getElementById('stopBtn').addEventListener('click', function() {
-            websocket.send("STOP_MOTOR");
-        });
+        // Inicializar solo una vez
+        if (!window.appInitialized) {
+            window.appInitialized = true;
+            document.addEventListener('DOMContentLoaded', initializeApp);
+        }
     </script>
 </body>
 </html>
